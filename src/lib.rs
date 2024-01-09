@@ -310,8 +310,6 @@ struct State {
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
     render_pipeline2: wgpu::RenderPipeline,
-    diffuse_bind_group: wgpu::BindGroup,
-    diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
     obj_model: model::Model,
     camera: Camera,
@@ -325,6 +323,7 @@ struct State {
     light_buffer: Buffer,
     light_render_pipeline: wgpu::RenderPipeline,
     light_bind_group: wgpu::BindGroup,
+    debug_material: model::Material,
 }
 
 impl State {
@@ -381,11 +380,6 @@ impl State {
 
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("happy-tree.png");
-
-        let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
-
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
@@ -409,23 +403,24 @@ impl State {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
             });
-
-        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Texture Bind Group"),
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-        });
 
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -629,6 +624,36 @@ impl State {
 
         let camera_controller = CameraController::new(0.2);
 
+        let debug_material = {
+            let diffuse_bytes = include_bytes!("../res/cube/cobble-diffuse.png");
+            let normal_bytes = include_bytes!("../res/cube/cobble-normal.png");
+
+            let diffuse_texture = texture::Texture::from_bytes(
+                &device,
+                &queue,
+                diffuse_bytes,
+                "res/alt-diffuse.png",
+                false,
+            )
+            .unwrap();
+            let normal_texture = texture::Texture::from_bytes(
+                &device,
+                &queue,
+                normal_bytes,
+                "res/alt-normal.png",
+                true,
+            )
+            .unwrap();
+
+            model::Material::new(
+                &device,
+                "alt-material",
+                diffuse_texture,
+                normal_texture,
+                &texture_bind_group_layout,
+            )
+        };
+
         let state = Self {
             window,
             surface,
@@ -639,8 +664,6 @@ impl State {
             clear_color,
             render_pipeline,
             render_pipeline2,
-            diffuse_bind_group,
-            diffuse_texture,
             depth_texture,
             camera,
             camera_uniform,
@@ -654,6 +677,8 @@ impl State {
             instances,
             instance_buffer,
             obj_model,
+            #[allow(dead_code)]
+            debug_material,
         };
         state
     }
@@ -758,16 +783,13 @@ impl State {
                 occlusion_query_set: None,
             });
 
-            use crate::model::DrawLight; // NEW!
-            render_pass.set_pipeline(&self.light_render_pipeline); // NEW!
+            use crate::model::DrawLight;
+            render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(
                 &self.obj_model,
                 &self.camera_bind_group,
                 &self.light_bind_group,
-            ); // NEW!
-
-            // render_pass.set_pipeline(&self.render_pipeline);
-            // render_pass.draw(0..3, 0..1);
+            );
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline2);
@@ -777,6 +799,15 @@ impl State {
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );
+
+            // render_pass.set_pipeline(&self.render_pipeline2);
+            // render_pass.draw_model_instanced_with_material(
+            //     &self.obj_model,
+            //     &self.debug_material,
+            //     0..self.instances.len() as u32,
+            //     &self.camera_bind_group,
+            //     &self.light_bind_group,
+            // );
         }
 
         let command_buffers = encoder.finish();
